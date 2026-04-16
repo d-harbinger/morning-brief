@@ -1,0 +1,12 @@
+[Unit]
+Description=Morning Brief — daily catch-up trigger
+
+[Timer]
+# Fire at 7:00 AM every day
+OnCalendar=*-*-* 07:00:00
+# If the machine was off / sleeping at 7am, fire as soon as it's available
+Persistent=true
+Unit=morning-brief.service
+
+[Install]
+WantedBy=timers.target

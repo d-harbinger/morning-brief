@@ -1,0 +1,27 @@
+# Local secrets and state
+*.local.*
+.env
+.env.*
+!.env.example
+
+# Generated briefs, run logs
+output/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Old Hermes-shaped scaffold kept locally but not in git history
+_archive/

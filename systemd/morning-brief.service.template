@@ -1,0 +1,15 @@
+[Unit]
+Description=Morning Brief — generate and display today's digest
+# Wait for the graphical session so xdg-open / notify-send work
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+# __PROJECT_DIR__ is replaced by install.sh with the real path at install time.
+ExecStart=/bin/bash __PROJECT_DIR__/run_brief.sh
+WorkingDirectory=__PROJECT_DIR__
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

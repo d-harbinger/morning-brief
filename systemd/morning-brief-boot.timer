@@ -1,0 +1,11 @@
+[Unit]
+Description=Morning Brief — trigger 30s after login
+
+[Timer]
+# Fire 30 seconds after the user service manager starts
+# (i.e. shortly after login / graphical session start)
+OnStartupSec=30s
+Unit=morning-brief.service
+
+[Install]
+WantedBy=timers.target

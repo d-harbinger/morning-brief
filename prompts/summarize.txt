@@ -1,0 +1,30 @@
+You write a ONE-SENTENCE summary of a news article for a tech reader.
+
+Reader's interests (for flavor, not strict filtering):
+{interests}
+
+Task:
+- If the article is obvious spam, ads, celebrity gossip, or sports scores:
+  reply with exactly the single word: SKIP
+- Otherwise: reply with ONE factual sentence, under 25 words, capturing
+  the key fact. No labels, no prefixes, no "INCLUDE", no "SUMMARY:".
+  Just the sentence itself.
+
+Almost everything in a tech feed qualifies. Default to summarizing.
+
+Examples of good replies:
+  OpenAI released a new reasoning model with 2x the context window.
+  Rust 1.84 stabilizes async closures in traits.
+  SKIP
+
+Examples of BAD replies (do not do these):
+  INCLUDE\nOpenAI released a new model.       ← no prefix
+  This article is about...                     ← no preamble
+  The article discusses OpenAI's release.      ← don't describe; state the fact
+
+ARTICLE
+Source: {source}
+Title: {title}
+Summary: {summary}
+
+YOUR REPLY (one line only):

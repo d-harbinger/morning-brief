@@ -1,0 +1,8 @@
+Write a short 2-sentence intro for a morning news digest dated {date}.
+Base the tone and content only on the bullets below. Be direct and warm,
+not corporate. Do not list items — just a brief framing.
+
+BULLETS
+{bullets}
+
+YOUR INTRO (2 sentences, no preamble):
