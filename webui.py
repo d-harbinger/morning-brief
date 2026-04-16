@@ -226,7 +226,7 @@ def generate():
         python_exe = sys.executable
 
     proc = subprocess.Popen(
-        [python_exe, str(HERE / "brief.py"), "--no-open"],
+        [python_exe, str(HERE / "brief.py"), "--force", "--no-open"],
         cwd=str(HERE),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
