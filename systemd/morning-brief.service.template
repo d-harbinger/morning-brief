@@ -7,7 +7,7 @@ PartOf=graphical-session.target
 [Service]
 Type=oneshot
 # __PROJECT_DIR__ is replaced by install.sh with the real path at install time.
-ExecStart=/bin/bash __PROJECT_DIR__/run_brief.sh
+ExecStart=__PROJECT_DIR__/.venv/bin/python __PROJECT_DIR__/brief.py --wait-for-ollama
 WorkingDirectory=__PROJECT_DIR__
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 

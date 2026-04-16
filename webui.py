@@ -102,8 +102,16 @@ def save():
         for f in data["feeds"]:
             name = (f.get("name") or "").strip()
             url = (f.get("url") or "").strip()
-            if name and url:
-                clean_feeds.append({"name": name, "url": url})
+            if not (name and url):
+                continue
+            entry: dict = {"name": name, "url": url}
+            limit_raw = f.get("limit")
+            if limit_raw not in (None, "", "null"):
+                try:
+                    entry["limit"] = int(limit_raw)
+                except (TypeError, ValueError):
+                    pass
+            clean_feeds.append(entry)
         config["feeds"] = clean_feeds
 
     save_config(config)
@@ -206,7 +214,7 @@ TEMPLATE = r"""
     outline: none; border-color: var(--accent);
   }
   textarea { min-height: 8rem; resize: vertical; line-height: 1.45; }
-  .row { display: grid; grid-template-columns: 180px 1fr auto; gap: 0.5rem;
+  .row { display: grid; grid-template-columns: 170px 1fr 70px auto; gap: 0.5rem;
     align-items: center; margin-bottom: 0.5rem; }
   .row input { margin: 0; }
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
@@ -290,12 +298,16 @@ TEMPLATE = r"""
 
 <section>
   <h2>Feeds</h2>
-  <p class="hint">Any RSS or Atom URL works. Drag-drop not wired up; use the X button to remove.</p>
+  <p class="hint">Any RSS or Atom URL works. <strong>Limit</strong> is optional — if blank, the default per-feed cap above applies. Use it to weight feeds.</p>
+  <div class="row" style="font-size:0.72rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.3rem;">
+    <span>Name</span><span>URL</span><span>Limit</span><span></span>
+  </div>
   <div id="feeds">
     {% for feed in config.get('feeds', []) %}
     <div class="row feed-row">
       <input type="text" class="f-name" value="{{ feed.name }}" placeholder="Name">
       <input type="url" class="f-url" value="{{ feed.url }}" placeholder="https://…">
+      <input type="number" class="f-limit" min="1" max="100" value="{{ feed.limit if feed.limit is not none else '' }}" placeholder="—">
       <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
     </div>
     {% endfor %}
@@ -321,12 +333,13 @@ TEMPLATE = r"""
 </main>
 
 <script>
-function addFeed(name = "", url = "") {
+function addFeed(name = "", url = "", limit = "") {
   const row = document.createElement("div");
   row.className = "row feed-row";
   row.innerHTML = `
     <input type="text" class="f-name" value="${name}" placeholder="Name">
     <input type="url" class="f-url" value="${url}" placeholder="https://…">
+    <input type="number" class="f-limit" min="1" max="100" value="${limit}" placeholder="—">
     <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
   `;
   document.getElementById("feeds").appendChild(row);
@@ -337,10 +350,14 @@ function currentConfig() {
   const custom = document.getElementById("model-custom").value.trim();
   const model = sel.value === "__custom__" ? custom : sel.value;
 
-  const feeds = Array.from(document.querySelectorAll(".feed-row")).map(r => ({
-    name: r.querySelector(".f-name").value.trim(),
-    url: r.querySelector(".f-url").value.trim(),
-  })).filter(f => f.name && f.url);
+  const feeds = Array.from(document.querySelectorAll(".feed-row")).map(r => {
+    const lim = r.querySelector(".f-limit").value.trim();
+    return {
+      name: r.querySelector(".f-name").value.trim(),
+      url: r.querySelector(".f-url").value.trim(),
+      limit: lim === "" ? null : +lim,
+    };
+  }).filter(f => f.name && f.url);
 
   return {
     model,

@@ -17,14 +17,13 @@ browser when you sit down at your PC in the morning.
 
 | What you want to do | How |
 |---|---|
-| Open today's brief (or generate it) | `brief` (alias) |
-| Force a fresh brief right now | `brief-new` (alias) |
+| Fresh brief right now | `brief` (alias) |
 | Edit feeds / interests / model | `brief-edit` (alias) → web UI at `http://127.0.0.1:4747` |
-| Run manually with a small test | `python brief.py --limit 3` |
-| See what the LLM replied for each item | `python brief.py --verbose --no-open` |
+| Test run with a few items | `python brief.py --limit 3` |
+| See what the LLM replied per item | `python brief.py --verbose --no-open` |
 | Fetch-only, no LLM | `python brief.py --dry-run` |
-| Check the timers | `systemctl --user list-timers \| grep morning-brief` |
-| Inspect failures | `tail -f output/run.log` + `systemctl --user status morning-brief.service` |
+| Check scheduled timers | `systemctl --user list-timers \| grep morning-brief` |
+| Inspect failures | `journalctl --user -u morning-brief.service -n 50` |
 
 ---
 
@@ -58,7 +57,7 @@ work on a small local model.
 
 ```
 morning-brief/
-├── brief.py                      ← main pipeline
+├── brief.py                      ← main pipeline (fetch, summarize, render, open)
 ├── render_html.py                ← HTML renderer (self-contained, styled)
 ├── webui.py                      ← Flask web UI for editing config
 ├── config.yaml                   ← feeds, interests, model, limits
@@ -67,7 +66,6 @@ morning-brief/
 │   └── intro.txt                 ← intro-writing prompt
 ├── requirements.txt              ← Python deps
 │
-├── run_brief.sh                  ← wrapper for the systemd timer
 ├── brief-web.sh                  ← launches the web UI
 ├── install.sh                    ← installs systemd user timers
 ├── uninstall.sh                  ← removes them
@@ -77,7 +75,7 @@ morning-brief/
 │   ├── morning-brief-boot.timer          ← fires 30s after login
 │   └── morning-brief-daily.timer         ← fires at 07:00, persistent
 │
-├── output/                       ← generated briefs + logs (gitignored)
+├── output/                       ← generated briefs (gitignored)
 ├── _archive/                     ← old Hermes-shaped scaffold
 └── README.md
 ```
@@ -155,21 +153,26 @@ Both timers should be active.
 
 ### 6. Set up shell aliases (optional but nice)
 
+These call `brief.py` directly — no systemd round-trip — so they're instant
+and show live progress in your terminal.
+
 On fish:
 
 ```fish
-alias --save brief='systemctl --user start morning-brief.service'
-alias --save brief-new='rm -f ~/Projects/morning-brief/output/brief-(date +%F).{txt,html}; systemctl --user start morning-brief.service'
+alias --save brief='~/Projects/morning-brief/.venv/bin/python ~/Projects/morning-brief/brief.py --force'
 alias --save brief-edit='~/Projects/morning-brief/brief-web.sh'
 ```
 
 On bash/zsh, add to `~/.bashrc` or `~/.zshrc`:
 
 ```bash
-alias brief='systemctl --user start morning-brief.service'
-alias brief-new='rm -f ~/Projects/morning-brief/output/brief-$(date +%F).{txt,html}; systemctl --user start morning-brief.service'
+alias brief='~/Projects/morning-brief/.venv/bin/python ~/Projects/morning-brief/brief.py --force'
 alias brief-edit='~/Projects/morning-brief/brief-web.sh'
 ```
+
+`brief` always regenerates (via `--force`). The scheduled timers still use
+idempotency — if today's brief already exists when the timer fires, it just
+opens the existing one.
 
 ---
 
@@ -184,8 +187,8 @@ The system runs itself after setup. Behavior:
 | PC was off at 7:00 AM; you log in at noon | Catch-up timer fires 30s after login |
 | PC stays on across midnight | Next day's 7:00 AM timer runs normally |
 | You reboot mid-day | Boot timer fires, sees today's brief already exists, just opens it (no regen) |
-| You want a fresh brief on demand | `brief-new` |
-| You just want to look at today's brief | `brief` |
+| You want a fresh brief on demand | `brief` |
+| You just want to look at today's brief | open `output/brief-YYYY-MM-DD.html` directly |
 | You want to edit feeds/interests | `brief-edit` |
 
 Idempotency: the wrapper checks `output/brief-YYYY-MM-DD.html`. If it exists,
@@ -341,9 +344,8 @@ Click through before acting on anything important.
 | Web UI can't reach Ollama | Ollama daemon not running | `systemctl start ollama` (or `systemctl --user start ollama`) |
 
 Logs to check, in order:
-1. `output/run.log` — wrapper-level messages
-2. `systemctl --user status morning-brief.service` — unit state
-3. `journalctl --user -u morning-brief.service -n 50 --no-pager` — full errors
+1. `systemctl --user status morning-brief.service` — unit state
+2. `journalctl --user -u morning-brief.service -n 50 --no-pager` — full errors
 
 ---
 

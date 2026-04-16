@@ -81,10 +81,17 @@ def _entry_datetime(entry) -> dt.datetime | None:
 
 
 def _strip_html(text: str) -> str:
-    # Rough — good enough for RSS summaries
+    """Clean up an RSS summary: strip tags, decode entities, drop publisher markers."""
+    import html as _html
     import re
-    text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"<[^>]+>", "", text)           # drop tags
+    text = _html.unescape(text)                   # decode &amp;, &#8230;, &hellip; etc.
+    text = re.sub(r"\s+", " ", text)              # collapse whitespace
+    # Strip common "continues" markers publishers tack on the end of excerpts:
+    #   [...], [&hellip;], [...], […], or "… Read more →" style endings
+    text = re.sub(r"\s*\[\s*(?:\.{3}|…)\s*\]\s*$", "", text)
+    text = re.sub(r"\s*(?:Read (?:more|full article)|Continue reading)\s*[→>»]*\s*$",
+                  "", text, flags=re.IGNORECASE)
     return text.strip()
 
 
@@ -191,11 +198,30 @@ def main() -> int:
                     help="Print each article title and the raw LLM response (for debugging)")
     ap.add_argument("--no-open", action="store_true",
                     help="Don't open the HTML brief in a browser after generating")
+    ap.add_argument("--force", action="store_true",
+                    help="Regenerate even if today's brief already exists")
+    ap.add_argument("--wait-for-ollama", action="store_true",
+                    help="Poll for Ollama on localhost:11434 for up to 30s before starting "
+                         "(use at boot time via systemd)")
     args = ap.parse_args()
 
     here = Path(__file__).parent
     config_path = args.config if args.config.is_absolute() else here / args.config
     config = load_config(config_path)
+
+    # Idempotency: if today's HTML brief already exists and --force not given,
+    # just open it and exit. Lets timers fire safely multiple times per day
+    # (boot + daily + reboot) without wasteful regeneration.
+    now = dt.datetime.now()
+    today_html = _today_html_path(here, config, now)
+    if today_html and today_html.exists() and not args.force and not args.dry_run:
+        print(f"[{_ts()}] Today's brief exists: {today_html}", file=sys.stderr)
+        if not args.no_open:
+            _open_in_browser(today_html)
+        return 0
+
+    if args.wait_for_ollama:
+        _wait_for_ollama(config["ollama"]["host"])
 
     summarize_tpl = load_prompt(here / "prompts" / "summarize.txt")
     intro_tpl = load_prompt(here / "prompts" / "intro.txt")
@@ -207,8 +233,16 @@ def main() -> int:
     all_items: list[Item] = []
     for feed in config["feeds"]:
         try:
-            items = fetch_feed(feed["url"], feed["name"], lookback, per_feed_cap)
-            print(f"  {feed['name']}: {len(items)} items", file=sys.stderr)
+            # --limit (CLI) overrides everything; else per-feed 'limit' wins;
+            # else the global per_feed_limit applies.
+            if args.limit is not None:
+                cap = args.limit
+            elif feed.get("limit") is not None:
+                cap = int(feed["limit"])
+            else:
+                cap = per_feed_cap
+            items = fetch_feed(feed["url"], feed["name"], lookback, cap)
+            print(f"  {feed['name']}: {len(items)} items (cap {cap})", file=sys.stderr)
             all_items.extend(items)
         except Exception as e:
             print(f"  {feed['name']}: ERROR {e}", file=sys.stderr)
@@ -287,6 +321,37 @@ def main() -> int:
     return 0
 
 
+def _today_html_path(here: Path, config: dict, now: dt.datetime) -> Path | None:
+    """Return the path where today's HTML brief would live, per config."""
+    out_path = config.get("output_path")
+    if not out_path:
+        return None
+    out_file = Path(out_path)
+    if not out_file.is_absolute():
+        out_file = here / out_file
+    out_file = out_file.expanduser()
+    date_suffix = now.date().isoformat()
+    return out_file.with_name(f"{out_file.stem}-{date_suffix}.html")
+
+
+def _wait_for_ollama(host: str, max_seconds: int = 30) -> None:
+    """Poll Ollama's /api/tags until it responds or we give up."""
+    import time as _time
+    url = f"{host.rstrip('/')}/api/tags"
+    print(f"[{_ts()}] Waiting for Ollama at {url}...", file=sys.stderr)
+    for _ in range(max_seconds):
+        try:
+            r = httpx.get(url, timeout=2)
+            if r.status_code == 200:
+                print(f"[{_ts()}] Ollama is up.", file=sys.stderr)
+                return
+        except Exception:
+            pass
+        _time.sleep(1)
+    print(f"[{_ts()}] Ollama did not come up in {max_seconds}s — continuing anyway.",
+          file=sys.stderr)
+
+
 def _open_in_browser(path: Path) -> None:
     """Open the HTML brief in the user's default browser."""
     import subprocess
@@ -339,19 +404,24 @@ def _print_terminal(intro: str, digest: list[tuple[Item, str]], now: dt.datetime
         console.print("[dim]Quiet morning — nothing notable in the feeds.[/dim]")
         return
 
-    console.print(Rule("News", style="#6b553d"))
+    # Group items by source (preserve fetch order)
+    groups: dict[str, list[tuple[Item, str]]] = {}
     for item, summary in digest:
-        source_tag = f"[bold #d4a574][{item.source}][/bold #d4a574]"
-        link = item.link
-        line = Text.from_markup(f"  {source_tag} ")
-        if link:
-            line.append(summary, style=f"link {link}")
-        else:
-            line.append(summary)
-        console.print(line)
-        if link:
-            console.print(f"    [dim]{link}[/dim]")
-    console.print()
+        groups.setdefault(item.source or "Other", []).append((item, summary))
+
+    for source, items in groups.items():
+        count = f"{len(items)} item{'s' if len(items) != 1 else ''}"
+        console.print(Rule(f"[bold #d4a574]{source}[/bold #d4a574]  [dim]· {count}[/dim]",
+                           style="#6b553d", align="left"))
+        for item, summary in items:
+            link = item.link
+            line = Text("  • ", style="#8f8d87")
+            if link:
+                line.append(summary, style=f"link {link}")
+            else:
+                line.append(summary, style="")
+            console.print(line)
+        console.print()
 
 
 def _ts() -> str:

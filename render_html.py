@@ -100,42 +100,95 @@ PAGE_TEMPLATE = """<!doctype html>
       margin: 0 0 1rem;
       font-weight: 600;
     }}
+    .group {{
+      margin-bottom: 2rem;
+    }}
+    .group-head {{
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      margin: 0 0 0.8rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }}
+    .group-name {{
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+    .group-domain {{
+      color: var(--text-dim);
+      font-size: 0.78rem;
+    }}
+    .group-count {{
+      margin-left: auto;
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+    }}
     .items {{
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0.6rem;
     }}
     .item {{
-      padding: 1rem 1.25rem;
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 6px;
       transition: background 0.15s, border-color 0.15s;
+      overflow: hidden;
     }}
     .item:hover {{
       background: var(--bg-card-hover);
       border-color: var(--accent-dim);
     }}
-    .item-head {{
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      margin-bottom: 0.4rem;
+    .item > summary {{
+      list-style: none;
+      padding: 0.75rem 1rem 0.75rem 2.2rem;
+      cursor: pointer;
+      position: relative;
+      color: var(--text);
     }}
-    .source {{
+    .item > summary::-webkit-details-marker {{ display: none; }}
+    .item > summary::before {{
+      content: "▸";
+      position: absolute;
+      left: 0.8rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent-dim);
+      font-size: 0.85rem;
+      transition: transform 0.15s, color 0.15s;
+    }}
+    .item[open] > summary::before {{
+      transform: translateY(-50%) rotate(90deg);
+      color: var(--accent);
+    }}
+    .item-body {{
+      padding: 0 1rem 0.9rem 2.2rem;
+      color: var(--text-dim);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      border-top: 1px dashed var(--border);
+      margin-top: 0.1rem;
+      padding-top: 0.8rem;
+    }}
+    .item-body p {{ margin: 0 0 0.6rem; }}
+    .item-body .read-more {{
       display: inline-block;
-      padding: 0.15rem 0.55rem;
-      background: var(--source-bg);
-      color: var(--text-dim);
-      border-radius: 999px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.85rem;
+      border-bottom: 1px solid var(--accent-dim);
     }}
-    .domain {{
+    .item-body .read-more:hover {{
+      border-bottom-color: var(--accent);
+    }}
+    .item-body .no-body {{
+      font-style: italic;
       color: var(--text-dim);
-      font-size: 0.8rem;
     }}
     .summary {{
       margin: 0;
@@ -197,8 +250,8 @@ def render_brief_html(
 ) -> str:
     """Render the brief as a complete HTML document string."""
     if digest_items:
-        items_html = "\n".join(_render_item(item, summary) for item, summary in digest_items)
-        body_html = f'<div class="section-label">News</div>\n<div class="items">\n{items_html}\n</div>'
+        groups = _group_by_source(digest_items)
+        body_html = "\n".join(_render_group(name, items) for name, items in groups)
     else:
         body_html = '<div class="empty">Quiet morning — nothing notable in the feeds.</div>'
 
@@ -212,23 +265,61 @@ def render_brief_html(
     )
 
 
-def _render_item(item, summary: str) -> str:
-    title = getattr(item, "title", "") or ""
-    link = getattr(item, "link", "") or ""
-    source = getattr(item, "source", "") or ""
-    domain = _domain_of(link)
+def _group_by_source(digest_items):
+    """Group items by source, preserving first-seen order of sources."""
+    groups: dict[str, list] = {}
+    for item, summary in digest_items:
+        source = getattr(item, "source", "") or "Other"
+        groups.setdefault(source, []).append((item, summary))
+    return list(groups.items())
 
-    summary_html = html.escape(summary)
-    if link:
-        summary_html = f'<a href="{html.escape(link)}" target="_blank" rel="noopener">{summary_html}</a>'
 
-    return f"""  <div class="item">
-    <div class="item-head">
-      <span class="source">{html.escape(source)}</span>
-      <span class="domain">{html.escape(domain)}</span>
+def _render_group(source: str, items: list) -> str:
+    # Show domain of the first item alongside the source name
+    first_link = getattr(items[0][0], "link", "") if items else ""
+    domain = _domain_of(first_link)
+    items_html = "\n".join(_render_item(item, summary) for item, summary in items)
+    count_label = f"{len(items)} item{'s' if len(items) != 1 else ''}"
+    return f"""<section class="group">
+    <div class="group-head">
+      <span class="group-name">{html.escape(source)}</span>
+      <span class="group-domain">{html.escape(domain)}</span>
+      <span class="group-count">{count_label}</span>
     </div>
-    <p class="summary">{summary_html}</p>
-  </div>"""
+    <div class="items">
+{items_html}
+    </div>
+  </section>"""
+
+
+def _render_item(item, summary: str) -> str:
+    link = getattr(item, "link", "") or ""
+    rss_summary = (getattr(item, "summary", "") or "").strip()
+    title = (getattr(item, "title", "") or "").strip()
+
+    # The headline summary (LLM output) — shown in the clickable row
+    headline_html = html.escape(summary)
+
+    # Expanded body: original RSS description (truncated if very long),
+    # with a "read full article" link if we have one.
+    if rss_summary:
+        body_text = rss_summary if len(rss_summary) < 600 else rss_summary[:600].rstrip() + "…"
+        body_inner = f"<p>{html.escape(body_text)}</p>"
+    elif title and title != summary:
+        body_inner = f'<p class="no-body">Original headline: {html.escape(title)}</p>'
+    else:
+        body_inner = '<p class="no-body">No additional context in the feed.</p>'
+
+    if link:
+        body_inner += (
+            f'<a class="read-more" href="{html.escape(link)}" '
+            f'target="_blank" rel="noopener">Read full article →</a>'
+        )
+
+    return f"""      <details class="item">
+        <summary>{headline_html}</summary>
+        <div class="item-body">{body_inner}</div>
+      </details>"""
 
 
 def _domain_of(url: str) -> str:

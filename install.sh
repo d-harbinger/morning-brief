@@ -28,12 +28,6 @@ if [[ ! -d "$UNITS_SRC" ]]; then
     exit 1
 fi
 
-if [[ ! -x "$HERE/run_brief.sh" ]]; then
-    warn "run_brief.sh is not executable — fixing."
-    chmod +x "$HERE/run_brief.sh"
-fi
-ok "run_brief.sh is executable"
-
 if [[ ! -x "$HERE/.venv/bin/python" ]]; then
     warn "No Python venv at $HERE/.venv — run these first:"
     warn "    cd $HERE"
@@ -67,7 +61,7 @@ mkdir -p "$UNITS_DST"
 sed "s|__PROJECT_DIR__|$HERE|g" \
     "$UNITS_SRC/morning-brief.service.template" \
     > "$UNITS_DST/morning-brief.service"
-ok "Rendered morning-brief.service with ExecStart=$HERE/run_brief.sh"
+ok "Rendered morning-brief.service with ExecStart=$HERE/.venv/bin/python brief.py"
 
 cp -v "$UNITS_SRC"/morning-brief-boot.timer \
       "$UNITS_SRC"/morning-brief-daily.timer \
@@ -96,10 +90,10 @@ What happens next:
 
 Test it right now:
   systemctl --user start morning-brief.service
-  tail -f $HERE/output/run.log
+  journalctl --user -u morning-brief.service -f
 
 See output at:
-  $HERE/output/brief-\$(date +%F).txt
+  $HERE/output/brief-\$(date +%F).html
 
 Uninstall later with:
   $HERE/uninstall.sh

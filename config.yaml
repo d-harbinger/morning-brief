@@ -8,8 +8,9 @@ ollama:
 # How far back to look for new items in each feed
 lookback_hours: 24
 
-# Cap items fetched per feed (prevents one noisy feed from dominating)
-per_feed_limit: 10
+# Default cap per feed. Individual feeds can override with their own
+# `limit:` field below.
+per_feed_limit: 5
 
 # Cap on final digest size after LLM filtering
 max_digest_items: 10
@@ -29,33 +30,44 @@ interests: |
 output_path: "output/brief.txt"
 
 # Feeds to pull from. Any RSS/Atom URL works.
-# Tip: to disable a feed temporarily, comment out its lines.
+# `limit:` is optional per feed — if omitted, `per_feed_limit` above applies.
+# Use it to weight feeds: more items from high-signal sources, fewer from
+# chatty ones.
 feeds:
-  # Aggregators
+  # Aggregators — HN can dominate; keep its count modest
   - name: "Hacker News"
     url: "https://news.ycombinator.com/rss"
+    limit: 5
 
   # Tech news
   - name: "The Verge"
     url: "https://www.theverge.com/rss/index.xml"
+    limit: 8
   - name: "Ars Technica"
     url: "https://feeds.arstechnica.com/arstechnica/index"
+    limit: 5
   - name: "404 Media"
     url: "https://www.404media.co/rss/"
+    limit: 5
   - name: "The Register"
     url: "https://www.theregister.com/headlines.atom"
+    limit: 5
 
   # Linux / systems
   - name: "Phoronix"
     url: "https://www.phoronix.com/rss.php"
+    limit: 5
   - name: "LWN"
     url: "https://lwn.net/headlines/rss"
+    limit: 3
 
-  # Security / privacy
+  # Security / privacy — low volume feeds, small caps are fine
   - name: "Krebs on Security"
     url: "https://krebsonsecurity.com/feed/"
+    limit: 3
   - name: "Schneier on Security"
     url: "https://www.schneier.com/feed/atom/"
+    limit: 3
 
   # Lobsters removed — times out consistently from many regions.
   # - name: "Lobsters"
