@@ -68,6 +68,25 @@ feeds:
   - name: "Schneier on Security"
     url: "https://www.schneier.com/feed/atom/"
     limit: 3
+  - name: "EFF Deeplinks"
+    url: "https://www.eff.org/rss/updates.xml"
+    limit: 3
+  - name: "Privacy Guides"
+    url: "https://www.privacyguides.org/en/feed.xml"
+    limit: 5
+
+  # AI / LLMs — individual voices with high signal
+  - name: "Simon Willison"
+    url: "https://simonwillison.net/atom/everything/"
+    limit: 5
+
+  # Languages / dev ecosystem
+  - name: "This Week in Rust"
+    url: "https://this-week-in-rust.org/rss.xml"
+    limit: 2
+  - name: "Changelog"
+    url: "https://changelog.com/posts/feed"
+    limit: 3
 
   # Lobsters removed — times out consistently from many regions.
   # - name: "Lobsters"
