@@ -51,6 +51,10 @@ Everything else — fetching, filtering, rendering, writing files, scheduling,
 opening the browser — is plain Python. That's what makes the whole thing
 work on a small local model.
 
+The rendered brief groups items by source and makes each one click-to-expand:
+the one-line LLM summary is always visible, and clicking reveals the original
+RSS description plus a link to the full article.
+
 ---
 
 ## Files
@@ -156,23 +160,33 @@ Both timers should be active.
 These call `brief.py` directly — no systemd round-trip — so they're instant
 and show live progress in your terminal.
 
+The `cd`-then-relative form avoids shell quirks around `~/` expansion in
+argument lists (fish especially can mangle multiple tildes).
+
 On fish:
 
 ```fish
-alias --save brief='~/Projects/morning-brief/.venv/bin/python ~/Projects/morning-brief/brief.py --force'
-alias --save brief-edit='~/Projects/morning-brief/brief-web.sh'
+alias --save brief='cd $HOME/Projects/morning-brief && ./.venv/bin/python brief.py --force'
+alias --save brief-edit='$HOME/Projects/morning-brief/brief-web.sh'
 ```
 
 On bash/zsh, add to `~/.bashrc` or `~/.zshrc`:
 
 ```bash
-alias brief='~/Projects/morning-brief/.venv/bin/python ~/Projects/morning-brief/brief.py --force'
-alias brief-edit='~/Projects/morning-brief/brief-web.sh'
+alias brief='cd "$HOME/Projects/morning-brief" && ./.venv/bin/python brief.py --force'
+alias brief-edit='"$HOME/Projects/morning-brief/brief-web.sh"'
 ```
 
 `brief` always regenerates (via `--force`). The scheduled timers still use
 idempotency — if today's brief already exists when the timer fires, it just
 opens the existing one.
+
+If the alias produces a path error like `~Projects/...` (missing slash), your
+shell didn't expand the tilde. Use fully absolute paths instead:
+
+```fish
+alias --save brief='cd /home/YOURUSER/Projects/morning-brief && ./.venv/bin/python brief.py --force'
+```
 
 ---
 
@@ -191,8 +205,11 @@ The system runs itself after setup. Behavior:
 | You just want to look at today's brief | open `output/brief-YYYY-MM-DD.html` directly |
 | You want to edit feeds/interests | `brief-edit` |
 
-Idempotency: the wrapper checks `output/brief-YYYY-MM-DD.html`. If it exists,
-it just opens it — no redundant LLM calls.
+Idempotency: `brief.py` checks `output/brief-YYYY-MM-DD.html` at startup. If
+it exists and `--force` wasn't passed, it opens the existing file and exits
+without calling the LLM again. The `brief` alias passes `--force`, so manual
+invocations always regenerate; the systemd timers do not, so duplicate timer
+fires (e.g. boot + daily on the same day) don't waste compute.
 
 ---
 
@@ -211,6 +228,18 @@ In rough order of impact:
    add a couple of examples of GOOD and BAD replies.
 4. **Drop feeds that always get SKIP'd.** They're costing you model time.
 5. **Lower `max_digest_items`** for a tighter brief.
+6. **Set per-feed `limit:` overrides** in `config.yaml` to weight feeds —
+   fewer from chatty aggregators, more from high-signal sources:
+   ```yaml
+   feeds:
+     - name: "Hacker News"
+       url: "https://news.ycombinator.com/rss"
+       limit: 5        # HN can dominate; cap it
+     - name: "Krebs on Security"
+       url: "https://krebsonsecurity.com/feed/"
+       limit: 3        # low-volume, don't flood
+   ```
+   Omitting `limit:` falls back to the global `per_feed_limit`.
 
 ### Changing the visual style
 
@@ -336,7 +365,8 @@ Click through before acting on anything important.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | systemd exit 203 | Path wrong in service, or script not executable | Re-run `./install.sh` from the real repo path |
-| `brief` hangs for minutes | Normal first run on CPU — model load + per-item inference | Open a second terminal, `tail -f output/run.log` |
+| `brief` hangs for minutes | Normal first run on CPU — model load + per-item inference | Wait it out. Progress streams to your terminal via `rich` — you'll see "Summarizing N items..." and per-item status |
+| Alias fails with `~Projects/...` path error | Shell didn't expand `~/` in an arg | Rewrite the alias with absolute paths (see "Set up shell aliases") |
 | All items `skipped` | Interests too narrow, or model over-conservative | Sharpen interests; check `--verbose` output |
 | Model replies with prefix (`INCLUDE\n...`) | Prompt drift from a different model | Parser handles common prefixes; if still leaking, tighten prompt |
 | Feed keeps timing out | Slow upstream | Raise timeout in `brief.py` `fetch_feed()`, or drop the feed |
@@ -362,4 +392,3 @@ No API keys, no subscriptions, no cloud egress.
 ## License
 
 Do whatever you want with this. It's yours now.
-# morning-brief
