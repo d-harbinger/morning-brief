@@ -577,7 +577,15 @@ def main() -> int:
 
     print(f"Morning Brief web UI → http://{HOST}:{PORT}")
     print("Ctrl-C to stop.")
-    app.run(host=HOST, port=PORT, debug=False)
+
+    # Use waitress (pure-Python production WSGI server) instead of Flask's
+    # built-in dev server. Avoids the "don't use in production" warning.
+    # Falls back to Flask's server if waitress isn't installed.
+    try:
+        from waitress import serve
+        serve(app, host=HOST, port=PORT, threads=4, _quiet=True)
+    except ImportError:
+        app.run(host=HOST, port=PORT, debug=False)
     return 0
 
 
