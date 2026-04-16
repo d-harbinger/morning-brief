@@ -24,6 +24,8 @@ from flask import Flask, jsonify, redirect, render_template_string, request, url
 
 HERE = Path(__file__).parent
 CONFIG_PATH = HERE / "config.yaml"
+TIMER_SOURCE = HERE / "systemd" / "morning-brief-daily.timer"
+TIMER_INSTALLED = Path.home() / ".config" / "systemd" / "user" / "morning-brief-daily.timer"
 PORT = 4747
 HOST = "127.0.0.1"
 
@@ -67,18 +69,116 @@ def ollama_models() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Schedule (systemd timer) management
+
+import re as _re
+
+_ONCALENDAR_RE = _re.compile(r"^\s*OnCalendar\s*=\s*\*-\*-\*\s+(\d{2}):(\d{2})(?::\d{2})?\s*$")
+
+
+def read_schedule() -> list[str]:
+    """Return list of 'HH:MM' times from the daily timer file, or []."""
+    for path in (TIMER_INSTALLED, TIMER_SOURCE):
+        if path.exists():
+            times = []
+            for line in path.read_text().splitlines():
+                m = _ONCALENDAR_RE.match(line)
+                if m:
+                    times.append(f"{m.group(1)}:{m.group(2)}")
+            if times:
+                return times
+    return []
+
+
+def write_schedule(times: list[str]) -> dict:
+    """Rewrite the daily timer with the given 'HH:MM' list. Sync + reload systemd.
+
+    Returns {'ok': bool, 'message': str, 'installed': bool}.
+    """
+    # Validate
+    clean: list[str] = []
+    for t in times:
+        t = t.strip()
+        m = _re.match(r"^(\d{1,2}):(\d{2})$", t)
+        if not m:
+            return {"ok": False, "message": f"Bad time format: {t!r}. Use HH:MM."}
+        hh, mm = int(m.group(1)), int(m.group(2))
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            return {"ok": False, "message": f"Time out of range: {t}"}
+        clean.append(f"{hh:02d}:{mm:02d}")
+    if not clean:
+        return {"ok": False, "message": "At least one time is required."}
+
+    oncalendar_lines = "\n".join(f"OnCalendar=*-*-* {t}:00" for t in clean)
+    unit_body = (
+        "[Unit]\n"
+        "Description=Morning Brief — daily catch-up trigger\n"
+        "\n"
+        "[Timer]\n"
+        f"{oncalendar_lines}\n"
+        "Persistent=true\n"
+        "Unit=morning-brief.service\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+    TIMER_SOURCE.parent.mkdir(parents=True, exist_ok=True)
+    TIMER_SOURCE.write_text(unit_body)
+
+    installed = False
+    if TIMER_INSTALLED.exists() or TIMER_INSTALLED.parent.exists():
+        try:
+            TIMER_INSTALLED.parent.mkdir(parents=True, exist_ok=True)
+            TIMER_INSTALLED.write_text(unit_body)
+            installed = True
+        except Exception as e:
+            return {"ok": False, "message": f"Wrote source but could not update "
+                                             f"installed unit: {e}"}
+
+    # Reload + restart timer so the new schedule takes effect
+    if installed:
+        try:
+            subprocess.run(["systemctl", "--user", "daemon-reload"],
+                           check=True, capture_output=True, text=True, timeout=10)
+            subprocess.run(["systemctl", "--user", "restart", "morning-brief-daily.timer"],
+                           check=True, capture_output=True, text=True, timeout=10)
+        except subprocess.CalledProcessError as e:
+            return {"ok": False, "message": f"systemctl failed: {e.stderr.strip() or e}"}
+        except FileNotFoundError:
+            return {"ok": False, "message": "systemctl not found on PATH."}
+
+    msg = f"Saved {len(clean)} time(s)."
+    if not installed:
+        msg += " Source file updated; run ./install.sh to activate on systemd."
+    return {"ok": True, "message": msg, "installed": installed}
+
+
+# ---------------------------------------------------------------------------
 # Routes
 
 @app.get("/")
 def index():
     config = load_config()
     models = ollama_models()
+    schedule = read_schedule()
     return render_template_string(
         TEMPLATE,
         config=config,
         models=models,
+        schedule=schedule,
+        schedule_installed=TIMER_INSTALLED.exists(),
         config_json=json.dumps(config, indent=2),
     )
+
+
+@app.post("/schedule")
+def save_schedule_route():
+    data = request.get_json() or {}
+    times = data.get("times") or []
+    result = write_schedule(times)
+    status = 200 if result.get("ok") else 400
+    return jsonify(result), status
 
 
 @app.post("/save")
@@ -318,6 +418,32 @@ TEMPLATE = r"""
 </section>
 
 <section>
+  <h2>Schedule</h2>
+  <p class="hint">
+    Times (24-hour, HH:MM) when the brief auto-generates each day.
+    {% if not schedule_installed %}<br><strong>Note:</strong> systemd timer not installed yet — run <code>./install.sh</code> first to activate these.{% endif %}
+  </p>
+  <div id="schedule">
+    {% for t in schedule %}
+    <div class="row time-row" style="grid-template-columns: 1fr auto;">
+      <input type="time" class="f-time" value="{{ t }}" step="60">
+      <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
+    </div>
+    {% endfor %}
+    {% if not schedule %}
+    <div class="row time-row" style="grid-template-columns: 1fr auto;">
+      <input type="time" class="f-time" value="07:00" step="60">
+      <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
+    </div>
+    {% endif %}
+  </div>
+  <div class="actions">
+    <button class="ghost" type="button" onclick="addTime()">+ Add time</button>
+    <button type="button" onclick="saveSchedule()">Save schedule</button>
+  </div>
+</section>
+
+<section>
   <h2>Actions</h2>
   <div class="actions">
     <button type="button" onclick="generateNow()">Generate brief now</button>
@@ -396,6 +522,39 @@ async function generateNow() {
     setStatus("Generation started in the background. Click 'View today's brief' when done.", "ok");
   } catch (e) {
     setStatus("Generate failed: " + e.message, "err");
+  }
+}
+
+function addTime(value = "12:00") {
+  const row = document.createElement("div");
+  row.className = "row time-row";
+  row.style.gridTemplateColumns = "1fr auto";
+  row.innerHTML = `
+    <input type="time" class="f-time" value="${value}" step="60">
+    <button type="button" class="danger" onclick="this.closest('.row').remove()">×</button>
+  `;
+  document.getElementById("schedule").appendChild(row);
+}
+
+async function saveSchedule() {
+  const times = Array.from(document.querySelectorAll(".f-time"))
+    .map(el => el.value).filter(v => v);
+  if (times.length === 0) {
+    setStatus("Add at least one time.", "err");
+    return;
+  }
+  setStatus("Saving schedule…");
+  try {
+    const r = await fetch("/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ times }),
+    });
+    const result = await r.json();
+    if (!r.ok || !result.ok) throw new Error(result.message || r.statusText);
+    setStatus(result.message, "ok");
+  } catch (e) {
+    setStatus("Save failed: " + e.message, "err");
   }
 }
 
