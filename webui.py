@@ -29,6 +29,10 @@ TIMER_INSTALLED = Path.home() / ".config" / "systemd" / "user" / "morning-brief-
 PORT = 4747
 HOST = "127.0.0.1"
 
+# Tracks the most recent Generate invocation so /status can report progress.
+_current_run: dict = {"proc": None, "started": None, "finished": None,
+                      "exit_code": None}
+
 app = Flask(__name__)
 
 
@@ -221,6 +225,13 @@ def save():
 @app.post("/generate")
 def generate():
     """Kick off a brief generation in the background; return immediately."""
+    import time as _time
+
+    # If one is already running, don't launch another — return its status
+    existing = _current_run["proc"]
+    if existing is not None and existing.poll() is None:
+        return jsonify({"ok": True, "already_running": True, "pid": existing.pid})
+
     python_exe = str(HERE / ".venv" / "bin" / "python")
     if not Path(python_exe).exists():
         python_exe = sys.executable
@@ -232,7 +243,41 @@ def generate():
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    _current_run.update({
+        "proc": proc,
+        "started": _time.time(),
+        "finished": None,
+        "exit_code": None,
+    })
     return jsonify({"ok": True, "pid": proc.pid})
+
+
+@app.get("/status")
+def status():
+    """Report whether a generation is running, and for how long."""
+    import time as _time
+    proc = _current_run["proc"]
+    started = _current_run["started"]
+
+    if proc is None:
+        return jsonify({"state": "idle"})
+
+    exit_code = proc.poll()
+    if exit_code is None:
+        elapsed = int(_time.time() - started) if started else 0
+        return jsonify({"state": "running", "elapsed": elapsed, "pid": proc.pid})
+
+    # Finished — record once, then report
+    if _current_run["finished"] is None:
+        _current_run["finished"] = _time.time()
+        _current_run["exit_code"] = exit_code
+    elapsed = int((_current_run["finished"] - started)) if started else 0
+    return jsonify({
+        "state": "done",
+        "elapsed": elapsed,
+        "exit_code": exit_code,
+        "ok": exit_code == 0,
+    })
 
 
 @app.get("/brief/today")
@@ -495,9 +540,10 @@ function currentConfig() {
   };
 }
 
-function setStatus(msg, cls = "") {
+function setStatus(msg, cls = "", allowHtml = false) {
   const s = document.getElementById("status");
-  s.textContent = msg;
+  if (allowHtml) s.innerHTML = msg;
+  else s.textContent = msg;
   s.className = "status " + cls;
 }
 
@@ -514,12 +560,49 @@ async function saveAll() {
   }
 }
 
+let _pollTimer = null;
+
+function stopPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch("/status");
+    const s = await r.json();
+    if (s.state === "running") {
+      setStatus(`Generating… ${s.elapsed}s elapsed (pid ${s.pid})`);
+    } else if (s.state === "done") {
+      stopPolling();
+      if (s.ok) {
+        setStatus(
+          `Done in ${s.elapsed}s. `
+          + `<a href="/brief/today" target="_blank" style="color:var(--accent);text-decoration:underline">View today's brief →</a>`,
+          "ok", true
+        );
+      } else {
+        setStatus(`Generation failed (exit ${s.exit_code}). Check journalctl or run manually.`, "err");
+      }
+    }
+  } catch (e) {
+    // keep polling; transient error
+  }
+}
+
 async function generateNow() {
-  setStatus("Triggering generation (this takes a minute or two)…");
+  setStatus("Triggering generation…");
   try {
     const r = await fetch("/generate", { method: "POST" });
     if (!r.ok) throw new Error(r.statusText);
-    setStatus("Generation started in the background. Click 'View today's brief' when done.", "ok");
+    const d = await r.json();
+    if (d.already_running) {
+      setStatus("A generation is already running — watching progress…");
+    } else {
+      setStatus("Generation started. Polling for completion…");
+    }
+    stopPolling();
+    _pollTimer = setInterval(pollStatus, 3000);
+    pollStatus();
   } catch (e) {
     setStatus("Generate failed: " + e.message, "err");
   }
