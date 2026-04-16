@@ -176,6 +176,12 @@ PAGE_TEMPLATE = """<!doctype html>
       padding-top: 0.8rem;
     }}
     .item-body p {{ margin: 0 0 0.6rem; }}
+    .item-body .item-links {{
+      display: flex;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+      margin-top: 0.3rem;
+    }}
     .item-body .read-more {{
       display: inline-block;
       color: var(--accent);
@@ -296,12 +302,13 @@ def _render_item(item, summary: str) -> str:
     link = getattr(item, "link", "") or ""
     rss_summary = (getattr(item, "summary", "") or "").strip()
     title = (getattr(item, "title", "") or "").strip()
+    comments_url = (getattr(item, "comments_url", "") or "").strip()
 
     # The headline summary (LLM output) — shown in the clickable row
     headline_html = html.escape(summary)
 
     # Expanded body: original RSS description (truncated if very long),
-    # with a "read full article" link if we have one.
+    # with article + discussion links as appropriate.
     if rss_summary:
         body_text = rss_summary if len(rss_summary) < 600 else rss_summary[:600].rstrip() + "…"
         body_inner = f"<p>{html.escape(body_text)}</p>"
@@ -310,11 +317,19 @@ def _render_item(item, summary: str) -> str:
     else:
         body_inner = '<p class="no-body">No additional context in the feed.</p>'
 
+    links = []
     if link:
-        body_inner += (
+        links.append(
             f'<a class="read-more" href="{html.escape(link)}" '
             f'target="_blank" rel="noopener">Read full article →</a>'
         )
+    if comments_url and comments_url != link:
+        links.append(
+            f'<a class="read-more" href="{html.escape(comments_url)}" '
+            f'target="_blank" rel="noopener">Discuss →</a>'
+        )
+    if links:
+        body_inner += '<div class="item-links">' + " ".join(links) + "</div>"
 
     return f"""      <details class="item">
         <summary>{headline_html}</summary>

@@ -31,6 +31,7 @@ class Item:
     link: str
     source: str
     published: dt.datetime | None
+    comments_url: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -60,12 +61,18 @@ def fetch_feed(url: str, name: str, lookback_hours: int, limit: int | None) -> l
         published = _entry_datetime(entry)
         if published and published < cutoff:
             continue
+        raw_summary = _strip_html(entry.get("summary", ""))
+        # HN and some other feeds use '<a href="...">Comments</a>' as the
+        # description — treat that as empty since it has no real info.
+        if raw_summary.strip().lower() in {"comments", "link", "read more", ""}:
+            raw_summary = ""
         items.append(Item(
             title=entry.get("title", "").strip(),
-            summary=_strip_html(entry.get("summary", "")),
+            summary=raw_summary,
             link=entry.get("link", ""),
             source=name,
             published=published,
+            comments_url=entry.get("comments", "") or "",
         ))
         if limit and len(items) >= limit:
             break
